@@ -1,0 +1,68 @@
+name: Build AI Toolkit Remote from ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "AIToolkitRemote.zip"
+      - ".github/workflows/aitoolkitremote.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ZIP
+        run: |
+          set -euo pipefail
+          test -s AIToolkitRemote.zip
+          unzip -t AIToolkitRemote.zip >/dev/null
+      - name: Extract
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/AITKRemote"
+          mkdir -p "$RUNNER_TEMP/AITKRemote"
+          unzip -q AIToolkitRemote.zip -d "$RUNNER_TEMP/AITKRemote"
+          PROJECT_YML="$(find "$RUNNER_TEMP/AITKRemote" -type f -path '*/ios/project.yml' -print -quit)"
+          test -n "$PROJECT_YML"
+          echo "IOS_DIR=$(dirname "$PROJECT_YML")" >> "$GITHUB_ENV"
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: |
+          cd "$IOS_DIR"
+          xcodegen generate
+          test -d AIToolkitRemote.xcodeproj
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$IOS_DIR/AIToolkitRemote.xcodeproj" \
+            -scheme AIToolkitRemote \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/AITKDerived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            clean build
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="$(find "$RUNNER_TEMP/AITKDerived/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name 'AIToolkitRemote.app' -print -quit)"
+          test -n "$APP"
+          rm -rf Payload AIToolkitRemote.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/AIToolkitRemote.app
+          zip -qry AIToolkitRemote.ipa Payload
+          test -s AIToolkitRemote.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIToolkitRemote-IPA
+          path: AIToolkitRemote.ipa
+          if-no-files-found: error
